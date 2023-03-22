@@ -216,5 +216,12 @@ outputs = pd.DataFrame(outputs.detach().cpu().numpy())
 test_outputs = pd.DataFrame(test_outputs.detach().cpu().numpy())
 val_outputs = pd.DataFrame(val_outputs.detach().cpu().numpy())
 
+train_data = train_data.cpu()
+test_data = test_data.cpu()
+val_data = val_data.cpu()
+np.savetxt('train_data.csv', train_data, delimiter=',')
+np.savetxt('test_data.csv', test_data, delimiter=',')
+np.savetxt('val_data.csv', val_data, delimiter=',')
+
 write_dataframes_to_excel(train_target, test_target, val_target, outputs, val_outputs, test_outputs)
 print("xlsx writng done\r\n")

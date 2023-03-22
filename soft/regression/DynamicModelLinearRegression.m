@@ -1,8 +1,4 @@
 %% explain section
-% git passwd = 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
-% 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
-% fucking git cola.. give me linux-cola!!!
-
 % This Code based on "Power Consumption Characterization, Modeling and Estimation of Electric Vehicles"
 % energy = integral(IVdt) = integral(Fds)
 % I , V -> EV motor Voltage and Current.
@@ -45,32 +41,90 @@
 %% working section
     %% data load
 data = readtable("data.xlsx");
-V1 = data(:,"frontV");
-V2 = data(:,"backV");
-V3 = data(:,"trunkV");
-C = data(:,"frontC");
-y = (V1 + V2 + V3) * C;
-x1 = data(:,"accel");
-x2 = data(:,"aMotorvelocity");
-
-% 데이터 샘플 개수
-m = length(y);
-
-% X 변수를 만듭니다.
-X = [ones(m, 1), x1, x2, x1.*x2, x2.^2];
-
-% theta(모델 파라미터) 값을 초기화합니다.
-initial_theta = zeros(size(X, 2), 1);
-
-% 옵션을 설정합니다.
-options = optimset('GradObj', 'on', 'MaxIter', 400);
-
-% 비용 함수와 기울기를 계산하는 함수를 정의합니다.
-costFunction = @(t) (1/(2*m)) * sum((X*t - y).^2);
-gradFunction = @(t) (1/m) * X' * (X*t - y);
-
-% fmincg 함수를 사용하여 theta(모델 파라미터) 값을 학습합니다.
-[theta, cost] = fmincg(costFunction, initial_theta, options, gradFunction);
+tlength = height(data(:,"frontV"));
+V1 = table2array(data(2500:tlength,"frontV"));
+V2 = table2array(data(2500:tlength,"backV"));
+V3 = table2array(data(2500:tlength,"trunkV"));
+C = table2array(data(2500:tlength,"frontC"));
+P = (V1 + V2 + V3).*C;
 
 
-disp(theta);
+aXx = table2array(data(2500:tlength,"AccX"));
+aYy = table2array(data(2500:tlength,"AccY"));
+aZz = table2array(data(2500:tlength,"AccZ"));
+gXx = table2array(data(:,"GyroX"));
+gYy = table2array(data(:,"GyroY"));
+gZz = table2array(data(:,"GyroZ"));
+
+v = table2array(data(2500:tlength,"aMotorVelocity"));
+%% get accel
+% Define constants
+g = 9.81; % gravitational acceleration
+
+aX = aXx * g;
+aY = aYy * g;
+aZ = aZz * g;
+gX = gXx * pi / 180.0;
+gY = gYy * pi / 180.0;
+gZ = gZz * pi / 180.0;
+%{
+% Calculate pitch and roll angles
+pitch = atan2(aX, sqrt(aY.^2 + aZ.^2));
+roll = atan2(aY, sqrt(aX.^2 + aZ.^2));
+
+% Calculate actual angular velocity
+gX_actual = gX - gY.*sin(roll) + gZ.*cos(roll);
+gY_actual = gY.*cos(pitch) + gZ.*sin(pitch);
+gZ_actual = -gY.*sin(pitch) + gZ.*cos(pitch);
+
+% Integrate actual angular velocity over time to get change in orientation
+dt = 0.01; % sample time (in seconds)
+delta_pitch = cumsum(gX_actual * dt);
+delta_roll = cumsum(gY_actual * dt);
+delta_yaw = cumsum(gZ_actual * dt);
+
+% Apply rotation matrix to accelerometer readings to get actual linear acceleration
+accX_actual = aX.*cos(delta_pitch) + aY.*sin(delta_roll).*sin(delta_pitch) + aZ.*cos(delta_roll).*sin(delta_pitch);
+accY_actual = aY.*cos(delta_roll) - aZ.*sin(delta_roll);
+accZ_actual = -aX.*sin(delta_pitch) + aY.*sin(delta_roll).*cos(delta_pitch) + aZ.*cos(delta_roll).*cos(delta_pitch);
+
+% Combine linear acceleration and gravitational acceleration to get total acceleration
+a = sqrt(accX_actual.^2 + accY_actual.^2 + accZ_actual.^2) - g;
+%}
+dt = 0.01;
+a = sqrt(aX.^2+aY.^2+aZ.^2)-g ;
+minaZz = min(aZz);
+minaZ = min(aZ);
+movemeanda = movmean(a(:,1),100);
+movemeandat = linspace(0, length(movemeanda)*dt,length(movemeanda));
+plot(movemeandat,movemeanda);
+figure;
+xlabel('Time (s)');
+ylabel('AccelerationMovemeand (m/s^2)');
+% Plot acceleration data
+t = linspace(0, length(a)*dt, length(a));
+plot(t, a);
+figure;
+xlabel('Time (s)');
+ylabel('Acceleration (m/s^2)');
+%%
+
+%% perform linear regression
+X = [a.*v, v.^2, ones(length(a),1)];
+lm = fitlm(X, P);
+coef = lm.Coefficients.Estimate;
+ci = lm.coefCI;
+
+%% plot results
+figure;
+scatter3(a,v,P, 'filled');
+hold on;
+a_lim = [min(a), max(a)];
+v_lim = [min(v), max(v)];
+[X1,X2] = meshgrid(a_lim,v_lim);
+Y = coef(1)*X1.*X2 + coef(2)*X2.^2 + coef(3);
+surf(X1,X2,Y,'FaceAlpha',0.5);
+xlabel('Acceleration');
+ylabel('Velocity');
+zlabel('Power');
+title('Linear Regression Model');
